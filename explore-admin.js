@@ -1,9 +1,11 @@
 const { adminRequest } = require("./adminClient");
 
+// Unwraps a GraphQL connection ({ edges: [{ node }] }) into a plain array of nodes
 function nodes(connection) {
   return connection ? connection.edges.map((e) => e.node) : [];
 }
 
+// Prints a labeled section header followed by a console.table of the given rows
 function printTable(label, rows) {
   console.log(`\n===== ${label} =====`);
   if (!rows || rows.length === 0) {
@@ -13,6 +15,9 @@ function printTable(label, rows) {
   console.table(rows);
 }
 
+// Runs one query, converts the result to flat rows via toRows, and prints
+// it as a table. Prints the GraphQL error message instead if the query fails
+// (e.g. missing scope or Protected Customer Data approval).
 async function run(label, query, toRows) {
   try {
     const data = await adminRequest(query);
@@ -24,6 +29,7 @@ async function run(label, query, toRows) {
 }
 
 async function main() {
+  // Basic shop metadata — sanity check that auth is working
   await run(
     "Shop info",
     `query {
@@ -46,6 +52,8 @@ async function main() {
     ]
   );
 
+  // Customers plus their full order history and contact details.
+  // Requires read_customers + read_orders, and Protected Customer Data approval.
   await run(
     "Customers + full order history + contact details",
     `query {
@@ -76,6 +84,7 @@ async function main() {
     }`,
     (data) => {
       const rows = [];
+      // Flatten to one row per order; customers with no orders get a single placeholder row
       for (const customer of nodes(data.customers)) {
         const orders = nodes(customer.orders);
         if (orders.length === 0) {
@@ -112,6 +121,8 @@ async function main() {
     }
   );
 
+  // Products with their variants and each variant's legacy inventory count.
+  // Requires read_products.
   await run(
     "Products + variants (basic inventory field)",
     `query {
@@ -137,6 +148,7 @@ async function main() {
     }`,
     (data) => {
       const rows = [];
+      // Flatten to one row per variant
       for (const product of nodes(data.products)) {
         for (const variant of nodes(product.variants)) {
           rows.push({
@@ -154,6 +166,8 @@ async function main() {
     }
   );
 
+  // Existing draft orders. Requires write_draft_orders (implies read) and
+  // Protected Customer Data approval for the linked customer's email.
   await run(
     "Draft orders",
     `query {
@@ -179,6 +193,7 @@ async function main() {
       }))
   );
 
+  // Store locations. Requires read_locations.
   await run(
     "Locations",
     `query {
@@ -193,6 +208,8 @@ async function main() {
       }))
   );
 
+  // Per-location inventory levels for each product variant. Requires read_inventory
+  // (and read_locations for the location name).
   await run(
     "Inventory levels across locations",
     `query {
@@ -219,8 +236,10 @@ async function main() {
     }`,
     (data) => {
       const rows = [];
+      // Flatten to one row per (variant, location) inventory level
       for (const variant of nodes(data.productVariants)) {
         for (const level of nodes(variant.inventoryItem.inventoryLevels)) {
+          // quantities comes back as [{ name, quantity }, ...]; turn it into { available, on_hand, committed }
           const qty = Object.fromEntries(level.quantities.map((q) => [q.name, q.quantity]));
           rows.push({
             sku: variant.sku ?? "-",
